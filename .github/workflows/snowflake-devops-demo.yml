@@ -1,31 +1,53 @@
-name: Deploy to Staging
+pipeline {
+    agent any
 
-on:
-  push:
-    branches:
-      - staging
-    paths:
-      - 'dbscripts/**'
+    environment {
+        SNOWFLAKE_ACCOUNT = credentials('snowflake-account')
+    }
 
-  workflow_dispatch:
+    stages {
+        stage('Clone repository') {
+            steps {
+				echo 'inside clone repository'
+                script {
+                    // Checkout the repository and capture the result
+                    def gitCheckout = checkout(
+                        [
+                            $class: 'GitSCM',
+                            branches: [[name: '*/main']], // Specify the branch to checkout
+                            doGenerateSubmoduleConfigurations: false,
+                            extensions: [],
+                            submoduleCfg: [],
+                            userRemoteConfigs: [[url: 'https://github.com/sujithgh/snowflakerepo.git']]
+                        ]
+                    )
 
-jobs:
-  deploy-snowflake-changes-job:
-    runs-on: windows-latest
+                    // Check if the checkout was successful
+                    if (gitCheckout) {
+                        echo 'Repository cloned successfully'
+                    } else {
+                        error 'Failed to clone repository'
+                    }
+                }
+            }
+        }
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+        stage('List Repository Contents') {
+            steps {
+                bat 'dir' // List the contents of the current directory (where the repository was cloned)
+            }
+        }
 
-      - name: Deploy to Snowflake
-        env:
-          SNOWFLAKE_ACCOUNT: ${{ secrets.SNOWFLAKE_ACCOUNT }}
-          SNOWFLAKE_USER: ${{ secrets.SNOWFLAKE_USER }}
-          SNOWFLAKE_PASSWORD: ${{ secrets.SNOWFLAKE_PASSWORD }}
-          SNOWFLAKE_ROLE: ${{ secrets.SNOWFLAKE_ROLE }}
-          SNOWFLAKE_WAREHOUSE: ${{ secrets.SNOWFLAKE_WAREHOUSE }}
-          SNOWFLAKE_DATABASE: 'StagingDB'
-        run: |
-          echo "Using pre-installed SnowSQL to deploy to staging"
-          "C:\\Program Files\\Snowflake SnowSQL\\snowsql.exe" -a $SNOWFLAKE_ACCOUNT -u $SNOWFLAKE_USER -p $SNOWFLAKE_PASSWORD -r $SNOWFLAKE_ROLE -w $SNOWFLAKE_WAREHOUSE -d $SNOWFLAKE_DATABASE -f $GITHUB_WORKSPACE/dbscripts/your_script.sql
-      shell: cmd
+        stage('Deploy to Snowflake') {
+            steps {
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'snowflake-user', passwordVariable: 'SNOWSQL_PWD', usernameVariable: 'SNOWFLAKE_USER')]) {
+                        
+                            bat '"C:\\Program Files\\Snowflake SnowSQL\\snowsql.exe" -a "%SNOWFLAKE_ACCOUNT%" -u "%SNOWFLAKE_USER%" -d "AWSDB" -s "PUBLIC" -f "C:\\Program Files\\Snowflake SnowSQL\\firstscript.sql"'
+                                            }
+                }
+            }
+        }
+    }
+}
+
